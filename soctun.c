@@ -1,6 +1,4 @@
-#include <sys/types.h>
 #include <sys/ioctl.h>
-#include <sys/socket.h>
 #include <sys/sys_domain.h>
 #include <sys/kern_control.h>
 #include <net/if_utun.h>
@@ -11,7 +9,6 @@
 #include <signal.h>
 #include <unistd.h>
 #include <sys/un.h>
-#include <netinet/in.h>
 #include <netdb.h> 
 
 #include <stdlib.h> // exit, etc.
@@ -63,32 +60,46 @@ int tun(int unit) {
   return fd;
 }
 
-//int
-//unix (char *path) {
-//  int ufd;
-//  int cfd;
-//  socklen_t clen;
-//  struct sockaddr_un addr;
-//  struct sockaddr_un caddr;
-//
-//  ufd = socket(AF_UNIX, SOCK_STREAM, 0);
-//  //memset(&addr, 0, sizeof(addr));
-//  addr.sun_family = AF_UNIX;
-//  //snprintf(addr.sun_path, 100, "%s", path);
-//  strncpy(addr.sun_path, path, sizeof(addr.sun_path)-1);
-//  unlink(addr.sun_path);
-//  int c = bind(ufd, (struct sockaddr*)&addr, sizeof(addr));
-//  //int c = connect(ufd, (struct sockaddr*)&addr, sizeof(addr));
-//  if (c == -1) {
-//    perror ("connect(ufd)");
-//    return -1;
-//  }
-//  listen(ufd, 5);
-//  clen = sizeof(caddr);
-//  cfd = accept(ufd, (struct sockaddr *)&caddr, &clen);
-//  //return ufd;
-//  return cfd;
-//}
+int unix(char *path) {
+  int ufd;
+  int cfd;
+  socklen_t clen;
+  struct sockaddr_un addr;
+
+  ufd = socket(AF_UNIX, SOCK_STREAM, 0);
+  memset(&addr, 0, sizeof(addr));
+  addr.sun_family = AF_UNIX;
+  strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
+  int c = connect(ufd, (struct sockaddr*) &addr, sizeof(addr));
+  if (c == -1) {
+    perror("connect(ufd)");
+    return -1;
+  }
+  return ufd;
+}
+int unixServer(char *path) {
+  int ufd;
+  int cfd;
+  socklen_t clen;
+  struct sockaddr_un addr;
+  struct sockaddr_un caddr;
+
+  ufd = socket(AF_UNIX, SOCK_STREAM, 0);
+  memset(&addr, 0, sizeof(addr));
+  addr.sun_family = AF_UNIX;
+  strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
+  unlink(addr.sun_path);
+  int c = bind(ufd, (struct sockaddr*) &addr, sizeof(addr));
+  if (c == -1) {
+    perror("bind(ufd)");
+    return -1;
+  }
+  listen(ufd, 5);
+  clen = sizeof(caddr);
+  cfd = accept(ufd, (struct sockaddr *) &caddr, &clen);
+  return cfd;
+}
+
 int tcp(char *hostname, int portno) {
   int sockfd;
   struct sockaddr_in serveraddr;
@@ -112,7 +123,8 @@ int tcp(char *hostname, int portno) {
   bcopy((char *) server->h_addr,
   (char *)&serveraddr.sin_addr.s_addr, server->h_length);
   serveraddr.sin_port = htons(portno);
-
+  int flag = 1;
+//  setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof flag);
   /* connect: create a connection with the server */
   if (connect(sockfd, (struct sockaddr*) &serveraddr, sizeof(serveraddr)) < 0) {
     perror("connect(ufd)");
@@ -126,14 +138,17 @@ static void usage(char *name) {
 }
 
 int main(int argc, char *argv[]) {
-  int max = 4096;
+  int max = 1504;
   char *hostname;
+  char *path;
   int port;
   int tid;
   int ch;
+  int utunfd;
+  int unixfd;
   pid_t pid;
 
-  while ((ch = getopt(argc, argv, "mt:h:p:")) != -1)
+  while ((ch = getopt(argc, argv, "mt:h:p:u:")) != -1)
     switch (ch) {
     case 't':
       tid = atoi(optarg) + 1;
@@ -147,59 +162,80 @@ int main(int argc, char *argv[]) {
     case 'm':
       max = atoi(optarg);
       break;
+    case 'u':
+      path = optarg;
+      break;
     default:
       usage(argv[0]);
     }
 
-  int utunfd = tun(tid);
-  int unixfd = tcp(hostname, port);
+  utunfd = tun(tid);
+  if (port > 0) {
+    unixfd = tcp(hostname, port);
+  } else {
+    unixfd = unix(path);
+  }
+  fd_set readset;
 
+  int maxfd = unixfd;
+  if (maxfd < utunfd)
+    maxfd = utunfd;
+
+  //fcntl(utunfd,F_SETFL, O_NONBLOCK);
+  //fcntl(unixfd,F_SETFL, O_NONBLOCK);
   if (utunfd == -1 || unixfd == -1) {
-    fprintf(stderr, "Unable to establish UTUN descriptor - aborting\n");
+    fprintf(stderr, "Unable to establish UTUN/IPC descriptors - aborting\n");
     exit(1);
   }
 
-  pid = fork();
-  short t = 1;
-  if (pid == 0) {
-    while (t) {
-      unsigned char c[max];
-      int len;
-      int i;
+  unsigned char c[max];
+  int len;
+  for (;;) {
+    FD_ZERO(&readset);
+    FD_SET(utunfd, &readset);
+    FD_SET(unixfd, &readset);
 
+    select(maxfd + 1, &readset, NULL, NULL, NULL);
+    fprintf(stderr, "Reading\n");
+
+    if (FD_ISSET(utunfd, &readset)) {
       len = read(utunfd, c, max);
 
-      c[0] = 0;
-      c[1] = 0;
-      c[2] = 8;
-      c[3] = 0;
       if (len > 0) {
+        c[0] = 0;
+        c[1] = 0;
+        c[2] = 8;
+        c[3] = 0;
+        //        for (int i = 0; i< len; i++)
+        //        {
+        //           fprintf(stderr,"%02x ", c[i]);
+        //        }
+        //        fprintf(stderr,"\n\n");
         write(unixfd, c, len);
-      }
-      if (len <= 0) {
-        t = 0;
+      } else if (len == 0) {
+        break;
       }
     }
-  } else {
-    while (t) {
-      unsigned char c[max];
-      int len;
-      int i;
 
+    if (FD_ISSET(unixfd, &readset)) {
       len = read(unixfd, c, max);
 
       // First 4 bytes of read data are the AF: 2 for AF_INET, 1E for AF_INET6, etc..
-      c[0] = 0;
-      c[1] = 0;
-      c[2] = 0;
-      c[3] = 2;
       if (len > 0) {
+        c[0] = 0;
+        c[1] = 0;
+        c[2] = 0;
+        c[3] = 2;
+        //        for (int i = 0; i< len; i++)
+        //        {
+        //           fprintf(stderr,"%02x ", c[i]);
+        //        }
+        //        fprintf(stderr,"\n\n");
         write(utunfd, c, len);
-      } else {
-        t = 0;
+      } else if (len == 0) {
+        break;
       }
     }
-    kill(pid, SIGKILL);
   }
   close(utunfd);
   close(unixfd);

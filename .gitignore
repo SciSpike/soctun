@@ -36,3 +36,4 @@
 .project
 .settings/
 soctun
+*.tar.gz
