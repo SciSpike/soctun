@@ -1,17 +1,14 @@
 #include <sys/ioctl.h>
+#include <netinet/tcp.h>
 #include <sys/sys_domain.h>
 #include <sys/kern_control.h>
 #include <net/if_utun.h>
-#include <errno.h>
 #include <stdio.h>
 #include <string.h>
-#include <syslog.h>
-#include <signal.h>
 #include <unistd.h>
 #include <sys/un.h>
-#include <netdb.h> 
-
-#include <stdlib.h> // exit, etc.
+#include <netdb.h>
+#include <stdlib.h>
 
 /*
  * soctun - connects to socat style tcp socket for tunneling into a docker network.
@@ -21,24 +18,28 @@
  * Jonathan Kamke SciSpike LLC July 15, 2016
  */
 
-int tun(int unit) {
+int tun(int unit)
+{
   struct sockaddr_ctl sc;
   struct ctl_info ctlInfo;
   int fd;
 
   memset(&ctlInfo, 0, sizeof(ctlInfo));
   if (strlcpy(ctlInfo.ctl_name, UTUN_CONTROL_NAME, sizeof(ctlInfo.ctl_name))
-      >= sizeof(ctlInfo.ctl_name)) {
+      >= sizeof(ctlInfo.ctl_name))
+  {
     fprintf(stderr, "UTUN_CONTROL_NAME too long");
     return -1;
   }
   fd = socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
 
-  if (fd == -1) {
+  if (fd == -1)
+  {
     perror("socket(SYSPROTO_CONTROL)");
     return -1;
   }
-  if (ioctl(fd, CTLIOCGINFO, &ctlInfo) == -1) {
+  if (ioctl(fd, CTLIOCGINFO, &ctlInfo) == -1)
+  {
     perror("ioctl(CTLIOCGINFO)");
     close(fd);
     return -1;
@@ -52,7 +53,8 @@ int tun(int unit) {
 
   // If the connect is successful, a tun%d device will be created
 
-  if (connect(fd, (struct sockaddr *) &sc, sizeof(sc)) == -1) {
+  if (connect(fd, (struct sockaddr *) &sc, sizeof(sc)) == -1)
+  {
     perror("connect(AF_SYS_CONTROL)");
     close(fd);
     return -1;
@@ -60,7 +62,8 @@ int tun(int unit) {
   return fd;
 }
 
-int unix(char *path) {
+int unix(char *path)
+{
   int ufd;
   int cfd;
   socklen_t clen;
@@ -71,13 +74,15 @@ int unix(char *path) {
   addr.sun_family = AF_UNIX;
   strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
   int c = connect(ufd, (struct sockaddr*) &addr, sizeof(addr));
-  if (c == -1) {
+  if (c == -1)
+  {
     perror("connect(ufd)");
     return -1;
   }
   return ufd;
 }
-int unixServer(char *path) {
+int unixServer(char *path)
+{
   int ufd;
   int cfd;
   socklen_t clen;
@@ -90,7 +95,8 @@ int unixServer(char *path) {
   strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
   unlink(addr.sun_path);
   int c = bind(ufd, (struct sockaddr*) &addr, sizeof(addr));
-  if (c == -1) {
+  if (c == -1)
+  {
     perror("bind(ufd)");
     return -1;
   }
@@ -100,7 +106,8 @@ int unixServer(char *path) {
   return cfd;
 }
 
-int tcp(char *hostname, int portno) {
+int tcp(char *hostname, int portno)
+{
   int sockfd;
   struct sockaddr_in serveraddr;
   struct hostent *server;
@@ -112,7 +119,8 @@ int tcp(char *hostname, int portno) {
 
   /* gethostbyname: get the server's DNS entry */
   server = gethostbyname(hostname);
-  if (server == NULL) {
+  if (server == NULL)
+  {
     fprintf(stderr, "ERROR, no such host as %s\n", hostname);
     exit(0);
   }
@@ -120,24 +128,26 @@ int tcp(char *hostname, int portno) {
   /* build the server's Internet address */
   bzero((char *) &serveraddr, sizeof(serveraddr));
   serveraddr.sin_family = AF_INET;
-  bcopy((char *) server->h_addr,
-  (char *)&serveraddr.sin_addr.s_addr, server->h_length);
+  bcopy((char *) server->h_addr, (char *)&serveraddr.sin_addr.s_addr, server->h_length);
   serveraddr.sin_port = htons(portno);
   int flag = 1;
-//  setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof flag);
+  //setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof flag);
   /* connect: create a connection with the server */
-  if (connect(sockfd, (struct sockaddr*) &serveraddr, sizeof(serveraddr)) < 0) {
+  if (connect(sockfd, (struct sockaddr*) &serveraddr, sizeof(serveraddr)) < 0)
+  {
     perror("connect(ufd)");
     return -1;
   }
   return sockfd;
 }
-static void usage(char *name) {
+static void usage(char *name)
+{
   fprintf(stderr, "usage: %s:  [-h hostname] [-p port] [-t tunX]\n", name);
   exit(1);
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
   int max = 1504;
   char *hostname;
   char *path;
@@ -149,7 +159,8 @@ int main(int argc, char *argv[]) {
   pid_t pid;
 
   while ((ch = getopt(argc, argv, "mt:h:p:u:")) != -1)
-    switch (ch) {
+    switch (ch)
+    {
     case 't':
       tid = atoi(optarg) + 1;
       break;
@@ -170,9 +181,12 @@ int main(int argc, char *argv[]) {
     }
 
   utunfd = tun(tid);
-  if (port > 0) {
+  if (port > 0)
+  {
     unixfd = tcp(hostname, port);
-  } else {
+  }
+  else
+  {
     unixfd = unix(path);
   }
   fd_set readset;
@@ -181,58 +195,55 @@ int main(int argc, char *argv[]) {
   if (maxfd < utunfd)
     maxfd = utunfd;
 
-  //fcntl(utunfd,F_SETFL, O_NONBLOCK);
-  //fcntl(unixfd,F_SETFL, O_NONBLOCK);
-  if (utunfd == -1 || unixfd == -1) {
+  if (utunfd == -1 || unixfd == -1)
+  {
     fprintf(stderr, "Unable to establish UTUN/IPC descriptors - aborting\n");
     exit(1);
   }
 
   unsigned char c[max];
   int len;
-  for (;;) {
+  for (;;)
+  {
     FD_ZERO(&readset);
     FD_SET(utunfd, &readset);
     FD_SET(unixfd, &readset);
 
     select(maxfd + 1, &readset, NULL, NULL, NULL);
-    fprintf(stderr, "Reading\n");
 
-    if (FD_ISSET(utunfd, &readset)) {
+    if (FD_ISSET(utunfd, &readset))
+    {
       len = read(utunfd, c, max);
 
-      if (len > 0) {
+      if (len > 0)
+      {
         c[0] = 0;
         c[1] = 0;
         c[2] = 8;
         c[3] = 0;
-        //        for (int i = 0; i< len; i++)
-        //        {
-        //           fprintf(stderr,"%02x ", c[i]);
-        //        }
-        //        fprintf(stderr,"\n\n");
         write(unixfd, c, len);
-      } else if (len == 0) {
+      }
+      else if (len == 0)
+      {
         break;
       }
     }
 
-    if (FD_ISSET(unixfd, &readset)) {
+    if (FD_ISSET(unixfd, &readset))
+    {
       len = read(unixfd, c, max);
 
       // First 4 bytes of read data are the AF: 2 for AF_INET, 1E for AF_INET6, etc..
-      if (len > 0) {
+      if (len > 0)
+      {
         c[0] = 0;
         c[1] = 0;
         c[2] = 0;
         c[3] = 2;
-        //        for (int i = 0; i< len; i++)
-        //        {
-        //           fprintf(stderr,"%02x ", c[i]);
-        //        }
-        //        fprintf(stderr,"\n\n");
         write(utunfd, c, len);
-      } else if (len == 0) {
+      }
+      else if (len == 0)
+      {
         break;
       }
     }
