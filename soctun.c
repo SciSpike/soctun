@@ -131,7 +131,7 @@ int tcp(char *hostname, int portno)
   bcopy((char *) server->h_addr, (char *)&serveraddr.sin_addr.s_addr, server->h_length);
   serveraddr.sin_port = htons(portno);
   int flag = 1;
-  //setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof flag);
+  setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof flag);
   /* connect: create a connection with the server */
   if (connect(sockfd, (struct sockaddr*) &serveraddr, sizeof(serveraddr)) < 0)
   {
@@ -142,7 +142,7 @@ int tcp(char *hostname, int portno)
 }
 static void usage(char *name)
 {
-  fprintf(stderr, "usage: %s:  [-h hostname] [-p port] [-t tunX]\n", name);
+  fprintf(stderr, "usage: %s:  [-h hostname] [-p port] [-t tunX] [-u unix socket path]\n", name);
   exit(1);
 }
 
