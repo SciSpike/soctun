@@ -106,7 +106,7 @@ int unixServer(char *path)
   return cfd;
 }
 
-int tcp(char *hostname, int portno)
+int tcp(char *hostname, int portno, int noDelayFlag)
 {
   int sockfd;
   struct sockaddr_in serveraddr;
@@ -130,8 +130,8 @@ int tcp(char *hostname, int portno)
   serveraddr.sin_family = AF_INET;
   bcopy((char *) server->h_addr, (char *)&serveraddr.sin_addr.s_addr, server->h_length);
   serveraddr.sin_port = htons(portno);
-  int flag = 1;
-  setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof flag);
+  setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &noDelayFlag,
+      sizeof noDelayFlag);
   /* connect: create a connection with the server */
   if (connect(sockfd, (struct sockaddr*) &serveraddr, sizeof(serveraddr)) < 0)
   {
@@ -142,7 +142,9 @@ int tcp(char *hostname, int portno)
 }
 static void usage(char *name)
 {
-  fprintf(stderr, "usage: %s:  [-h hostname] [-p port] [-t tunX] [-u unix socket path]\n", name);
+  fprintf(stderr,
+      "usage: %s: [-n] [-h hostname] [-p port] [-t tunX] [-u unix socket path] [-m MTU]\n",
+      name);
   exit(1);
 }
 
@@ -152,13 +154,14 @@ int main(int argc, char *argv[])
   char *hostname;
   char *path;
   int port;
+  int noDelayFlag = 0;
   int tid;
   int ch;
   int utunfd;
   int unixfd;
   pid_t pid;
 
-  while ((ch = getopt(argc, argv, "mt:h:p:u:")) != -1)
+  while ((ch = getopt(argc, argv, "m:t:h:p:u:n")) != -1)
     switch (ch)
     {
     case 't':
@@ -173,6 +176,9 @@ int main(int argc, char *argv[])
     case 'm':
       max = atoi(optarg);
       break;
+    case 'n':
+      noDelayFlag = 1;
+      break;
     case 'u':
       path = optarg;
       break;
@@ -183,7 +189,7 @@ int main(int argc, char *argv[])
   utunfd = tun(tid);
   if (port > 0)
   {
-    unixfd = tcp(hostname, port);
+    unixfd = tcp(hostname, port, noDelayFlag);
   }
   else
   {
