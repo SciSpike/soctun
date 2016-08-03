@@ -268,11 +268,11 @@ int main(int argc, char *argv[])
 
     if (FD_ISSET(remoteFd, &readset))
     {
-      //we alway have remaining, set to header length
+      //we always have remaining, set to header length
       if (!expected && !remaining && !totalLen)
       {
         //frame + packet header
-        remaining = header * 2;
+        remaining = 8;
       }
 
       len = read(remoteFd, &fromRemote[totalLen], remaining);
