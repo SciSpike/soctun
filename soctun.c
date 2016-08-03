@@ -11,7 +11,7 @@
 #include <stdlib.h>
 
 /*
- * soctun - connects to socat style tcp socket for tunneling into a docker network.
+ * soctun - connects to socat style socket for tunneling into a private network.
  *
  * Inspiration: http://newosxbook.com/src.jl?tree=listings&file=17-15-utun.c by Jonathan Levin.
  *
@@ -143,7 +143,7 @@ int tcp(char *hostname, int portno, int noDelayFlag)
 static void usage(char *name)
 {
   fprintf(stderr,
-      "usage: %s: [-n] [-h hostname] [-p port] [-t tunX] [-u unix socket path] [-m MTU]\n",
+      "usage: %s: [-nv] [-h hostname] [-m MTU] [-p port] [-t tunX] [-u unix socket path]\n",
       name);
   exit(1);
 }
@@ -167,9 +167,9 @@ void printSome(unsigned char c[], int len, char *pipe)
 }
 int main(int argc, char *argv[])
 {
-  int max = 1504;
-  int debug = 0;
   int header = 4;
+  int mtu = 1500;
+  int debug = 0;
   char *hostname;
   char *path;
   int port;
@@ -180,34 +180,35 @@ int main(int argc, char *argv[])
   int remoteFd;
   pid_t pid;
 
-  while ((ch = getopt(argc, argv, "vm:t:h:p:u:n")) != -1)
+  while ((ch = getopt(argc, argv, "h:m:np:t:u:v")) != -1)
     switch (ch)
     {
-    case 'v':
-      debug++;
-      break;
-    case 't':
-      tid = atoi(optarg) + 1;
-      break;
     case 'h':
       hostname = optarg;
       break;
-    case 'p':
-      port = atoi(optarg);
-      break;
     case 'm':
-      max = atoi(optarg);
+      mtu = atoi(optarg) + header;
       break;
     case 'n':
       noDelayFlag = 1;
       break;
+    case 'p':
+      port = atoi(optarg);
+      break;
+    case 't':
+      tid = atoi(optarg) + 1;
+      break;
     case 'u':
       path = optarg;
+      break;
+    case 'v':
+      debug++;
       break;
     default:
       usage(argv[0]);
     }
 
+  int max = mtu + header;
   utunfd = tun(tid);
   if (port > 0)
   {
