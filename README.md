@@ -1,8 +1,76 @@
 # soctun
 
-## how to use with Docker for Mac
+## Why
 
-add something like this to your docker-compose.yml
+`soctun` was created to overcome Docker for Mac's known issue: [i can't ping my containers](https://docs.docker.com/docker-for-mac/networking/#/i-can-t-ping-my-containers). 
+
+## How
+
+We need to create a tunnel from your local Mac to a Docker network. This is done by running [socat](http://www.dest-unreach.org/socat/) in the Docker container which exposes a tunneling port. Then `soctun` runs on your local Mac which connects to the published port on Docker for Mac. You will then have a tunnel to the Docker network.
+
+
+```ditaa
++-------------------------------------------------------------------------------+
+|-|Your Mac|--------------------------------------------------------------------|
++-------------------------------------------------------------------------------+
+|                                                                               |
+| +-------------------------------------+   +--------------------------------+  |
+| | Terminal                            |   | Docker for Mac                 |  |
+| +-------------------------------------+   +--------------------------------+  |
+| |$ ping 172.18.0.9                    |   |  +--------------------------+  |  |
+| |64 bytes from 172.18.0.9: time=.90 ms|   |  | Docker network           |  |  |
+| |                                     |   |  +--------------------------+  |  |
+| |                                     |   |  | subnet 172.18/16         |  |  |
+| +-------------------------------------+   |  |                          |  |  |
+|                                           |  |  +-------------------+   |  |  |
+|                                           |  |  | vpn_container     |   |  |  |
+|                                           |  |  +-------------------+   |  |  |
+|                                           |  |  |-----------------+ |   |  |  |
++-------------------+                       |  |  || eth0 172.18.0.1| |   |  |  |
+|| en0 10.0.0.11    |                       |  |  |-----------------+ |   |  |  |
+|-------------------+                       |  |  |-----------------+ |   |  |  |
+|-------------------+                       |  |  || tun0 172.18.0.1| |   |  |  |
+|| utun0 172.18.1.1 |                       |  |  +--------+--------+ |   |  |  |
++----------^--------+                       |  |  |        |          |   |  |  |
+|          |                                |  |  | +------+--------+ |   |  |  |
+| +--------+--------+                       |  |  | | socat         | |   |  |  |
+| | soctun          |                       |  |  | +---------------+ |   |  |  |
+| +-----------------+                       |  |  | | TCP:4444 TUN  | |   |  |  |
+| | connect:TCP:RAND|                       |  |  | +------^--------+ |   |  |  |
+| +--------+--------+                       |  |  +-------------------+   |  |  |
+|          |                                |  |           |              |  |  |
+|          |                                |  +--------------------------+  |  |
+|          |                                |              |                 |  |
+|          |                                +  +-----------+----------+      |  |
+|          +--------+0.0.0.0:RANDOM+-------> <-+ publish              |      |  |
+|                                           +  +----------------------+      |  |
+|                                           |  | vpn RANDOM:4444      |      |  |
+|                                           |  +----------------------+      |  |
+|                                           +--------------------------------+  |
++-------------------------------------------------------------------------------+
+
+
+```
+
+## Install
+
+```
+curl -L https://github.com/SciSpike/soctun/releases/download/${SOCTUN_VERSION}/soctun.tar.gz > /tmp/soctun-${SOCTUN_VERSION}.tar.gz
+tar xf /tmp/soctun-${SOCTUN_VERSION}.tar.gz
+mv /tmp/soctun/soctun bin/soctun
+```
+
+## Build
+
+Make sure you have Xcode Developer Tools installed.
+
+```
+make soctun
+```
+
+## Example
+
+Add this to your `docker-compose.yml`.
 
 ```docker-compose.yml
 services:
@@ -22,8 +90,12 @@ docker exec -i test_vpn_1 sh -c 'ip link set tun0 up && ip link set mtu 1500 tun
 sudo route -n add 172.18.0.0 -interface utun17218
 ```
 
-now you have direct access to your docker containers
+You now have direct access to your Docker containers.
 
 ```shell
 ping 172.18.0.2
 ```
+
+## General solution
+
+It is possible that this tool can, or could be adapted to, be a more general socket/tunneling solution.
