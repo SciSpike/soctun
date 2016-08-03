@@ -148,9 +148,28 @@ static void usage(char *name)
   exit(1);
 }
 
+void printSome(unsigned char c[], int len, char *pipe)
+{
+  for (int i = 0; i < len; i++)
+  {
+    if (i % 0x10 == 0)
+    {
+      fprintf(stderr, "\n%s %04x ", pipe, i);
+    }
+    if (i % 8 == 0)
+    {
+      fprintf(stderr, " ");
+    }
+    fprintf(stderr, "%02x ", c[i]);
+  }
+  fprintf(stderr, "\n\n");
+
+}
 int main(int argc, char *argv[])
 {
   int max = 1504;
+  int debug = 0;
+  int header = 4;
   char *hostname;
   char *path;
   int port;
@@ -158,12 +177,15 @@ int main(int argc, char *argv[])
   int tid;
   int ch;
   int utunfd;
-  int unixfd;
+  int remoteFd;
   pid_t pid;
 
-  while ((ch = getopt(argc, argv, "m:t:h:p:u:n")) != -1)
+  while ((ch = getopt(argc, argv, "vm:t:h:p:u:n")) != -1)
     switch (ch)
     {
+    case 'v':
+      debug++;
+      break;
     case 't':
       tid = atoi(optarg) + 1;
       break;
@@ -189,45 +211,54 @@ int main(int argc, char *argv[])
   utunfd = tun(tid);
   if (port > 0)
   {
-    unixfd = tcp(hostname, port, noDelayFlag);
+    remoteFd = tcp(hostname, port, noDelayFlag);
   }
   else
   {
-    unixfd = unix(path);
+    remoteFd = unix(path);
   }
   fd_set readset;
 
-  int maxfd = unixfd;
+  int maxfd = remoteFd;
   if (maxfd < utunfd)
     maxfd = utunfd;
 
-  if (utunfd == -1 || unixfd == -1)
+  if (utunfd == -1 || remoteFd == -1)
   {
     fprintf(stderr, "Unable to establish UTUN/IPC descriptors - aborting\n");
     exit(1);
   }
 
-  unsigned char c[max];
+  unsigned char fromRemote[max];
+  unsigned char fromTun[max];
   int len;
+  int expected = 0;
+  int totalLen = 0;
+  int remaining = 0;
   for (;;)
   {
     FD_ZERO(&readset);
     FD_SET(utunfd, &readset);
-    FD_SET(unixfd, &readset);
+    FD_SET(remoteFd, &readset);
 
     select(maxfd + 1, &readset, NULL, NULL, NULL);
 
     if (FD_ISSET(utunfd, &readset))
     {
-      len = read(utunfd, c, max);
+      len = read(utunfd, fromTun, max);
 
       if (len > 0)
       {
-        c[0] = 0;
-        c[1] = 0;
-        c[2] = 8;
-        c[3] = 0;
-        write(unixfd, c, len);
+        if (debug)
+        {
+          printSome(fromTun, len, ">>");
+        }
+        //set frame
+        fromTun[0] = 0;
+        fromTun[1] = 0;
+        fromTun[2] = 8;
+        fromTun[3] = 0;
+        write(remoteFd, fromTun, len);
       }
       else if (len == 0)
       {
@@ -235,26 +266,64 @@ int main(int argc, char *argv[])
       }
     }
 
-    if (FD_ISSET(unixfd, &readset))
+    if (FD_ISSET(remoteFd, &readset))
     {
-      len = read(unixfd, c, max);
-
-      // First 4 bytes of read data are the AF: 2 for AF_INET, 1E for AF_INET6, etc..
-      if (len > 0)
+      //we alway have remaining, set to header length
+      if (!expected && !remaining && !totalLen)
       {
-        c[0] = 0;
-        c[1] = 0;
-        c[2] = 0;
-        c[3] = 2;
-        write(utunfd, c, len);
+        //frame + packet header
+        remaining = header * 2;
+      }
+
+      len = read(remoteFd, &fromRemote[totalLen], remaining);
+      remaining = remaining - len;
+      totalLen += len;
+
+      //got it all, but just the header, parse expected
+      if (!expected && !remaining)
+      {
+        remaining = expected = (fromRemote[6] << 8) | (fromRemote[7] & 0xff);
+        remaining = remaining - header;
+        if (debug)
+        {
+          fprintf(stderr,
+              "Finished reading header totalLen %i pExpected %i remaining %i\n",
+              totalLen, expected, remaining);
+          printSome(fromRemote, totalLen, "<<");
+        }
+      }
+      //really got it all, ship it
+      else if (expected && !remaining)
+      {
+        if (debug)
+        {
+          fprintf(stderr,
+              "Finished reading packet totalLen %i pExpected %i remaining %i\n",
+              totalLen, expected, remaining);
+          printSome(fromRemote, totalLen, "<<");
+        }
+        //set frame
+        fromRemote[0] = 0;
+        fromRemote[1] = 0;
+        fromRemote[2] = 0;
+        fromRemote[3] = 2;
+        write(utunfd, fromRemote, totalLen);
+        //we just completed a packet, so reset
+        expected = totalLen = remaining = 0;
       }
       else if (len == 0)
       {
         break;
+      }
+      else if (debug)
+      {
+        fprintf(stderr,
+            "Keep reading packet totalLen %i pExpected %i remaining %i\n",
+            totalLen, expected, remaining);
       }
     }
   }
   close(utunfd);
-  close(unixfd);
+  close(remoteFd);
   return (0);
 }
